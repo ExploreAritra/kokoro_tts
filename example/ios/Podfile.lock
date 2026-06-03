@@ -1,0 +1,41 @@
+PODS:
+  - audio_session (0.0.1):
+    - Flutter
+  - Flutter (1.0.0)
+  - flutter_soloud (0.0.1):
+    - Flutter
+  - kokoro_tts (0.0.1):
+    - Flutter
+    - onnxruntime-c
+  - onnxruntime-c (1.20.0)
+
+DEPENDENCIES:
+  - audio_session (from `.symlinks/plugins/audio_session/ios`)
+  - Flutter (from `Flutter`)
+  - flutter_soloud (from `.symlinks/plugins/flutter_soloud/ios`)
+  - kokoro_tts (from `.symlinks/plugins/kokoro_tts/ios`)
+
+SPEC REPOS:
+  trunk:
+    - onnxruntime-c
+
+EXTERNAL SOURCES:
+  audio_session:
+    :path: ".symlinks/plugins/audio_session/ios"
+  Flutter:
+    :path: Flutter
+  flutter_soloud:
+    :path: ".symlinks/plugins/flutter_soloud/ios"
+  kokoro_tts:
+    :path: ".symlinks/plugins/kokoro_tts/ios"
+
+SPEC CHECKSUMS:
+  audio_session: 9bb7f6c970f21241b19f5a3658097ae459681ba0
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  flutter_soloud: d9969a9777b511239e85da6e108e05b429207baf
+  kokoro_tts: 46a0431d0cb889958cac465af5b0d50631c0fb4c
+  onnxruntime-c: 07cfff40dda7e1c54a4350bb2ad226c63150fce3
+
+PODFILE CHECKSUM: 1e5641b37bdf91373395acef4676ea2018264b7f
+
+COCOAPODS: 1.16.2
