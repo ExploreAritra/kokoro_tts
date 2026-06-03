@@ -1,0 +1,437 @@
+/*
+ * Copyright (C) 2022 Beka Gozalishvili
+ * Copyright (C) 2012-2015 Reece H. Dunn
+ * Copyright (C) 2011 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * This file implements the Android Text-to-Speech engine for eSpeak.
+ *
+ * Android Version: 4.0 (Ice Cream Sandwich)
+ * API Version:     14
+ */
+
+package com.reecedunn.espeak;
+
+import android.annotation.SuppressLint;
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.media.AudioTrack;
+import android.os.Build;
+import android.os.Bundle;
+import android.preference.PreferenceManager;
+import android.speech.tts.SynthesisCallback;
+import android.speech.tts.SynthesisRequest;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.TextToSpeechService;
+import android.util.Log;
+import android.util.Pair;
+
+import com.reecedunn.espeak.SpeechSynthesis.SynthReadyCallback;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * Implements the eSpeak engine as a {@link TextToSpeechService}.
+ *
+ * @author msclrhd@gmail.com (Reece H. Dunn)
+ * @author alanv@google.com (Alan Viverette)
+ */
+@SuppressLint("NewApi")
+public class TtsService extends TextToSpeechService {
+    private static final String TAG = TtsService.class.getSimpleName();
+    private static Context storageContext;
+    private static final boolean DEBUG = BuildConfig.DEBUG;
+
+    private SpeechSynthesis mEngine;
+    private SynthesisCallback mCallback;
+
+    private List<Voice> mAllVoices = new ArrayList<Voice>();
+    private final Map<String, Voice> mAvailableVoices = new HashMap<String, Voice>();
+    protected Voice mMatchingVoice = null;
+
+    private SharedPreferences mPreferences;
+    private final SharedPreferences.OnSharedPreferenceChangeListener mOnPreferencesChanged =
+            new SharedPreferences.OnSharedPreferenceChangeListener() {
+                @Override
+                public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+                    if (LanguageSettings.PREF_SUPPORTED_LANGUAGES.equals(key)) {
+                        rebuildAvailableVoices();
+                    }
+                }
+            };
+
+    @Override
+    public void onCreate() {
+        storageContext = EspeakApp.getStorageContext();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
+            storageContext.moveSharedPreferencesFrom(this, this.getPackageName() + "_preferences");
+        mPreferences = PreferenceManager.getDefaultSharedPreferences(storageContext);
+        mPreferences.registerOnSharedPreferenceChangeListener(mOnPreferencesChanged);
+        if (!CheckVoiceData.hasBaseResources(storageContext)
+                || CheckVoiceData.canUpgradeResources(storageContext)) {
+            CheckVoiceData.extractVoiceData(storageContext);
+        }
+        initializeTtsEngine();
+        super.onCreate();
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        if (mPreferences != null) {
+            mPreferences.unregisterOnSharedPreferenceChangeListener(mOnPreferencesChanged);
+        }
+    }
+
+    /**
+     * Sets up the native eSpeak engine.
+     */
+    private void initializeTtsEngine() {
+        if (mEngine != null) {
+            mEngine.stop();
+            mEngine = null;
+        }
+
+        mEngine = new SpeechSynthesis(storageContext, mSynthCallback);
+        mMatchingVoice = null;
+        List<Voice> voices = mEngine.getAvailableVoices();
+        synchronized (mAvailableVoices) {
+            mAllVoices = new ArrayList<Voice>(voices);
+            if (DEBUG) Log.i(TAG, "initializeTtsEngine(): loaded voices=" + mAllVoices.size());
+        }
+        rebuildAvailableVoices();
+    }
+
+    @Override
+    protected String[] onGetLanguage() {
+        // This is used to specify the language requested from GetSampleText.
+        final Voice voice;
+        synchronized (mAvailableVoices) {
+            voice = mMatchingVoice;
+        }
+        if (voice == null) {
+            return new String[] { "eng", "GBR", "" };
+        }
+        return new String[] {
+            voice.locale.getISO3Language(),
+            voice.locale.getISO3Country(),
+            voice.locale.getVariant()
+        };
+    }
+
+    private Pair<Voice, Integer> findVoice(String language, String country, String variant) {
+        if (!CheckVoiceData.hasBaseResources(storageContext)) {
+            return new Pair<>(null, TextToSpeech.LANG_MISSING_DATA);
+        }
+
+        final Locale query = new Locale(language, country, variant);
+
+        Voice languageVoice = null;
+        Voice countryVoice = null;
+
+        synchronized (mAvailableVoices) {
+            for (Voice voice : mAvailableVoices.values()) {
+                switch (voice.match(query)) {
+                    case TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE:
+                        return new Pair<>(voice, TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE);
+                    case TextToSpeech.LANG_COUNTRY_AVAILABLE:
+                        countryVoice = voice;
+                    case TextToSpeech.LANG_AVAILABLE:
+                        languageVoice = voice;
+                        break;
+                }
+            }
+        }
+
+        if (languageVoice == null) {
+            return new Pair<>(null, TextToSpeech.LANG_NOT_SUPPORTED);
+        } else if (countryVoice == null) {
+            return new Pair<>(languageVoice, TextToSpeech.LANG_AVAILABLE);
+        } else {
+            return new Pair<>(countryVoice, TextToSpeech.LANG_COUNTRY_AVAILABLE);
+        }
+    }
+
+    private Pair<Voice, Integer> getDefaultVoiceFor(String language, String country, String variant) {
+        final Pair<Voice, Integer> match = findVoice(language, country, variant);
+        switch (match.second) {
+            case TextToSpeech.LANG_AVAILABLE:
+                if (language.equals("fr") || language.equals("fra")) {
+                    return new Pair<>(findVoice(language, "FRA", "").first, match.second);
+                }
+                if (language.equals("pt") || language.equals("por")) {
+                    return new Pair<>(findVoice(language, "PRT", "").first, match.second);
+                }
+                return new Pair<>(findVoice(language, "", "").first, match.second);
+            case TextToSpeech.LANG_COUNTRY_AVAILABLE:
+                if ((language.equals("vi") || language.equals("vie")) && (country.equals("VN") || country.equals("VNM"))) {
+                    return new Pair<>(findVoice(language, country, "hue").first, match.second);
+                }
+                return new Pair<>(findVoice(language, country, "").first, match.second);
+            default:
+                return match;
+        }
+    }
+
+    @Override
+    protected int onIsLanguageAvailable(String language, String country, String variant) {
+        final int result = findVoice(language, country, variant).second;
+        if (result == TextToSpeech.LANG_NOT_SUPPORTED) {
+            // When the requested language is filtered out but other voices are
+            // available, report the language as available so that screen readers
+            // (e.g. Jieshuo) don't skip this engine entirely.
+            synchronized (mAvailableVoices) {
+                if (!mAvailableVoices.isEmpty()) {
+                    return TextToSpeech.LANG_AVAILABLE;
+                }
+            }
+        }
+        return result;
+    }
+
+    @Override
+    protected int onLoadLanguage(String language, String country, String variant) {
+        final Pair<Voice, Integer> match = getDefaultVoiceFor(language, country, variant);
+        if (match.first != null) {
+            synchronized (mAvailableVoices) {
+                mMatchingVoice = match.first;
+            }
+            return match.second;
+        }
+        if (match.second == TextToSpeech.LANG_NOT_SUPPORTED) {
+            // Fall back to a previously selected or available voice so that
+            // screen readers requesting the system language still get speech.
+            synchronized (mAvailableVoices) {
+                if (mMatchingVoice != null) {
+                    return TextToSpeech.LANG_AVAILABLE;
+                }
+                if (!mAvailableVoices.isEmpty()) {
+                    mMatchingVoice = mAvailableVoices.values().iterator().next();
+                    return TextToSpeech.LANG_AVAILABLE;
+                }
+            }
+        }
+        return match.second;
+    }
+
+    @Override
+    protected Set<String> onGetFeaturesForLanguage(String lang, String country, String variant) {
+        return new HashSet<String>();
+    }
+
+    @Override
+    public String onGetDefaultVoiceNameFor(String language, String country, String variant) {
+        final Voice match = getDefaultVoiceFor(language, country, variant).first;
+        return (match == null) ? null : match.name;
+    }
+
+    @Override
+    public List<android.speech.tts.Voice> onGetVoices() {
+        rebuildAvailableVoices();
+        List<android.speech.tts.Voice> voices = new ArrayList<android.speech.tts.Voice>();
+        synchronized (mAvailableVoices) {
+            for (Voice voice : mAvailableVoices.values()) {
+                int quality = android.speech.tts.Voice.QUALITY_NORMAL;
+                int latency = android.speech.tts.Voice.LATENCY_VERY_LOW;
+                Locale locale = new Locale(voice.locale.getISO3Language(), voice.locale.getISO3Country(), voice.locale.getVariant());
+                Set<String> features = onGetFeaturesForLanguage(locale.getLanguage(), locale.getCountry(), locale.getVariant());
+                voices.add(new android.speech.tts.Voice(voice.name, voice.locale, quality, latency, false, features));
+            }
+        }
+        return voices;
+    }
+
+    @Override
+    public int onIsValidVoiceName(String name) {
+        synchronized (mAvailableVoices) {
+            Voice voice = mAvailableVoices.get(name);
+            return (voice == null) ? TextToSpeech.ERROR : TextToSpeech.SUCCESS;
+        }
+    }
+
+    @Override
+    public int onLoadVoice(String name) {
+        synchronized (mAvailableVoices) {
+            Voice voice = mAvailableVoices.get(name);
+            if (voice == null) {
+                return TextToSpeech.ERROR;
+            }
+            mMatchingVoice = voice;
+            return TextToSpeech.SUCCESS;
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        Log.i(TAG, "Received stop request.");
+
+        mEngine.stop();
+    }
+
+    @SuppressWarnings("deprecation")
+    private String getRequestString(SynthesisRequest request) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            return request.getCharSequenceText().toString();
+        } else {
+            return request.getText();
+        }
+    }
+
+    protected int selectLanguageWithFallback(String language, String country, String variant) {
+        final int result = onLoadLanguage(language, country, variant);
+        switch (result) {
+            case TextToSpeech.LANG_MISSING_DATA:
+                return TextToSpeech.ERROR;
+            case TextToSpeech.LANG_NOT_SUPPORTED:
+                // fall back to a previously selected or available voice instead of failing.
+                // This allows screen readers that request the system language (e.g. Jieshuo)
+                // to still work when the user has selected only other languages.
+                synchronized (mAvailableVoices) {
+                    // Prefer reusing the last matching voice if one is already selected.
+                    if (mMatchingVoice != null) {
+                        return TextToSpeech.SUCCESS;
+                    }
+                    // Otherwise, pick an arbitrary available voice if any exist.
+                    if (!mAvailableVoices.isEmpty()) {
+                        mMatchingVoice = mAvailableVoices.values().iterator().next();
+                        return TextToSpeech.SUCCESS;
+                    }
+                }
+                // No previous voice and no available voices to fall back to.
+                return TextToSpeech.ERROR;
+        }
+        return TextToSpeech.SUCCESS;
+    }
+
+    private int selectVoice(SynthesisRequest request) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            final String name = request.getVoiceName();
+            if (name != null && !name.isEmpty()) {
+                return onLoadVoice(name);
+            }
+        }
+        return selectLanguageWithFallback(request.getLanguage(), request.getCountry(), request.getVariant());
+    }
+
+    @Override
+    protected synchronized void onSynthesizeText(SynthesisRequest request, SynthesisCallback callback) {
+        if (selectVoice(request) == TextToSpeech.ERROR)
+            return;
+
+        final Voice voice;
+        synchronized (mAvailableVoices) {
+            voice = mMatchingVoice;
+        }
+        if (voice == null)
+            return;
+
+        String text = getRequestString(request);
+        if (text == null)
+            return;
+
+        if (DEBUG) {
+            Log.i(TAG, "Received synthesis request: {language=\"" + voice.name + "\"}");
+
+            final Bundle params = request.getParams();
+            for (String key : params.keySet()) {
+                Log.v(TAG,
+                        "Synthesis request contained param {" + key + ", " + params.get(key) + "}");
+            }
+        }
+
+        if (text.startsWith("<?xml"))
+        {
+            // eSpeak does not recognise/skip "<?...?>" preprocessing tags,
+            // so need to remove these before passing to synthesize.
+            text = text.substring(text.indexOf("?>") + 2).trim();
+        }
+
+        mCallback = callback;
+        mCallback.start(mEngine.getSampleRate(), mEngine.getAudioFormat(), mEngine.getChannelCount());
+
+        final VoiceSettings settings = new VoiceSettings(PreferenceManager.getDefaultSharedPreferences(storageContext), mEngine);
+        mEngine.setVoice(voice, settings.getVoiceVariant());
+
+        int rate = settings.getRate();
+        int rateScale = request.getSpeechRate();
+        if (rateScale <= 0) {
+            rateScale = 100;
+        }
+        rate = (int)(((long)rate * rateScale) / 100);
+        mEngine.Rate.setValue(rate);
+        mEngine.Pitch.setValue(settings.getPitch(), request.getPitch());
+        mEngine.PitchRange.setValue(settings.getPitchRange());
+        mEngine.Volume.setValue(settings.getVolume());
+        mEngine.Punctuation.setValue(settings.getPunctuationLevel());
+        mEngine.setPunctuationCharacters(settings.getPunctuationCharacters());
+        mEngine.synthesize(text, text.startsWith("<speak"));
+    }
+
+    protected void rebuildAvailableVoices() {
+        synchronized (mAvailableVoices) {
+            mAvailableVoices.clear();
+            List<Voice> voices = mAllVoices;
+            if (mPreferences != null) {
+                voices = LanguageSettings.filterVoices(mAllVoices, mPreferences);
+            }
+            for (Voice voice : voices) {
+                mAvailableVoices.put(voice.name, voice);
+            }
+            if (DEBUG) {
+                Set<String> selected = LanguageSettings.getSelectedLanguages(mPreferences);
+                Log.i(TAG, "Rebuilt voices: selected=" + (selected == null ? "ALL" : selected.size()) +
+                        ", exposed=" + mAvailableVoices.size());
+            }
+            if (mMatchingVoice != null && !mAvailableVoices.containsKey(mMatchingVoice.name)) {
+                mMatchingVoice = null;
+            }
+        }
+    }
+
+    /**
+     * Pipes synthesizer output from native eSpeak to an {@link AudioTrack}.
+     */
+    private final SpeechSynthesis.SynthReadyCallback mSynthCallback = new SynthReadyCallback() {
+        @Override
+        public void onSynthDataReady(byte[] audioData) {
+            if ((audioData == null) || (audioData.length == 0)) {
+                onSynthDataComplete();
+                return;
+            }
+
+            final int maxBytesToCopy = mCallback.getMaxBufferSize();
+
+            int offset = 0;
+
+            while (offset < audioData.length) {
+                final int bytesToWrite = Math.min(maxBytesToCopy, (audioData.length - offset));
+                mCallback.audioAvailable(audioData, offset, bytesToWrite);
+                offset += bytesToWrite;
+            }
+        }
+
+        @Override
+        public void onSynthDataComplete() {
+            mCallback.done();
+        }
+    };
+}
