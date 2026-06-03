@@ -133,7 +133,7 @@ class _KokoroHomeState extends State<KokoroHome> with SingleTickerProviderStateM
     final espeakDataPath = '${supportDir.path}/assets/espeak-ng-data';
     if (!await Directory(espeakDataPath).exists()) {
       final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
-      final espeakAssets = manifest.listAssets().where((String key) => key.startsWith('assets/espeak-ng-data/'));
+      final espeakAssets = manifest.listAssets().where((String key) => key.startsWith('assets/espeak-ng-data/') && !key.contains('.DS_Store'));
 
       for (String assetPath in espeakAssets) {
         final byteData = await rootBundle.load(assetPath);
