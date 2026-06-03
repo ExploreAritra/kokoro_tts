@@ -112,7 +112,7 @@ class _KokoroHomeState extends State<KokoroHome> with SingleTickerProviderStateM
           if (total != -1) {
             setState(() {
               _downloadProgress = received / total;
-              _statusMessage = "Downloading $fileName... $((_downloadProgress * 100).toStringAsFixed(1))%";
+              _statusMessage = "Downloading $fileName... ${(_downloadProgress * 100).toStringAsFixed(1)}%";
             });
           }
         },
