@@ -4,6 +4,23 @@
 #include <vector>
 #include <string>
 
+// --- Clause Terminator Constants from espeak-ng ---
+#define CLAUSE_INTONATION_FULL_STOP 0x00000000
+#define CLAUSE_INTONATION_COMMA 0x00001000
+#define CLAUSE_INTONATION_QUESTION 0x00002000
+#define CLAUSE_INTONATION_EXCLAMATION 0x00003000
+
+#define CLAUSE_TYPE_CLAUSE 0x00040000
+#define CLAUSE_TYPE_SENTENCE 0x00080000
+
+#define CLAUSE_PERIOD (40 | CLAUSE_INTONATION_FULL_STOP | CLAUSE_TYPE_SENTENCE)
+#define CLAUSE_COMMA (20 | CLAUSE_INTONATION_COMMA | CLAUSE_TYPE_CLAUSE)
+#define CLAUSE_QUESTION (40 | CLAUSE_INTONATION_QUESTION | CLAUSE_TYPE_SENTENCE)
+#define CLAUSE_EXCLAMATION (45 | CLAUSE_INTONATION_EXCLAMATION | CLAUSE_TYPE_SENTENCE)
+#define CLAUSE_COLON (30 | CLAUSE_INTONATION_FULL_STOP | CLAUSE_TYPE_CLAUSE)
+#define CLAUSE_SEMICOLON (30 | CLAUSE_INTONATION_COMMA | CLAUSE_TYPE_CLAUSE)
+// --------------------------------------------------
+
 #define DR_WAV_IMPLEMENTATION
 #include "dr_wav.h"
 
@@ -12,6 +29,18 @@
 
 // Include espeak-ng
 #include "espeak-ng/src/include/espeak-ng/speak_lib.h"
+
+// Include execution providers for hardware acceleration
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+#include "coreml_provider_factory.h"
+#endif
+#endif
+
+#ifdef __ANDROID__
+#include "nnapi_provider_factory.h"
+#endif
 
 // Include Kokoro Vocab
 #include "kokoro_vocab.h"
@@ -52,6 +81,22 @@ FFI_PLUGIN_EXPORT int kokoro_init(const char* model_path, const char* voices_pat
         Ort::SessionOptions session_options;
         session_options.SetIntraOpNumThreads(2);
         
+#ifdef __APPLE__
+#if TARGET_OS_IPHONE
+        // CoreML dynamic shape recompilation causes massive memory leaks on iOS.
+        // Disable it so ONNX Runtime falls back to CPU which handles dynamic shapes safely.
+        // uint32_t coreml_flags = 0;
+        // OrtSessionOptionsAppendExecutionProvider_CoreML((OrtSessionOptions*)session_options, coreml_flags);
+        // LOGI("CoreML Execution Provider Appended.");
+#endif
+#endif
+
+#ifdef __ANDROID__
+        uint32_t nnapi_flags = 0;
+        OrtSessionOptionsAppendExecutionProvider_Nnapi((OrtSessionOptions*)session_options, nnapi_flags);
+        LOGI("NNAPI Execution Provider Appended.");
+#endif
+
         // Attempt to load model
         // In a real implementation we convert std::string to std::wstring on Windows
 #ifdef _WIN32
@@ -92,6 +137,29 @@ FFI_PLUGIN_EXPORT int kokoro_is_initialized() {
     return g_initialized ? 1 : 0;
 }
 
+static void set_espeak_language_from_voice(const char* voice_name) {
+    if (!voice_name || strlen(voice_name) == 0) return;
+    
+    char lang_code = voice_name[0];
+    const char* espeak_voice = "en-us"; // fallback
+    
+    switch (lang_code) {
+        case 'a': espeak_voice = "en-us"; break;
+        case 'b': espeak_voice = "en-gb"; break;
+        case 'e': espeak_voice = "es"; break;
+        case 'f': espeak_voice = "fr-fr"; break;
+        case 'h': espeak_voice = "hi"; break;
+        case 'i': espeak_voice = "it"; break;
+        case 'p': espeak_voice = "pt-br"; break;
+        case 'z': espeak_voice = "cmn"; break;
+        // 'j' for Japanese requires a separate tokenizer (like misaki) in upstream Kokoro, 
+        // but espeak's 'ja' is the closest fallback for this C++ port.
+        case 'j': espeak_voice = "ja"; break; 
+    }
+    
+    espeak_SetVoiceByName(espeak_voice);
+}
+
 FFI_PLUGIN_EXPORT int kokoro_synthesize(const char* text, const char* voice_name, const char* output_wav_path, float speed_val) {
     LOGI("Synthesize called with text length %zu, voice %s, output %s", text ? strlen(text) : 0, voice_name ? voice_name : "null", output_wav_path ? output_wav_path : "null");
     
@@ -107,13 +175,31 @@ FFI_PLUGIN_EXPORT int kokoro_synthesize(const char* text, const char* voice_name
         return -2;
     }
 
+    set_espeak_language_from_voice(voice_name);
+
     // 1. Text to Phonemes via espeak-ng (using 2 for espeakPHONEMES_IPA)
     std::string all_phonemes = "";
     const char* text_ptr = text;
     while (text_ptr != nullptr && *text_ptr != '\0') {
-        const char* phonemes = espeak_TextToPhonemes((const void**)&text_ptr, espeakCHARS_AUTO, 2);
+        int terminator = 0;
+        const char* phonemes = espeak_TextToPhonemesWithTerminator((const void**)&text_ptr, espeakCHARS_AUTO, 0x02, &terminator);
         if (phonemes) {
             all_phonemes += phonemes;
+        }
+
+        int punctuation = terminator & 0x000FFFFF;
+        if (punctuation == CLAUSE_PERIOD) {
+            all_phonemes += ".";
+        } else if (punctuation == CLAUSE_QUESTION) {
+            all_phonemes += "?";
+        } else if (punctuation == CLAUSE_EXCLAMATION) {
+            all_phonemes += "!";
+        } else if (punctuation == CLAUSE_COMMA) {
+            all_phonemes += ", ";
+        } else if (punctuation == CLAUSE_COLON) {
+            all_phonemes += ": ";
+        } else if (punctuation == CLAUSE_SEMICOLON) {
+            all_phonemes += "; ";
         }
     }
     
@@ -136,7 +222,7 @@ FFI_PLUGIN_EXPORT int kokoro_synthesize(const char* text, const char* voice_name
             if (it != KOKORO_VOCAB.end()) {
                 tokens.push_back(it->second);
             } else if (character != " " && character != "\n") {
-                // Unknown character
+                LOGI("Unknown character dropped: '%s'", character.c_str());
             }
             p += char_len;
         }

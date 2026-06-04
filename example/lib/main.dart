@@ -49,10 +49,17 @@ class _KokoroHomeState extends State<KokoroHome> with SingleTickerProviderStateM
   
   String _selectedVoice = 'af_bella';
   final List<String> _voices = [
-    'af', 'af_bella', 'af_nicole', 'af_sarah', 'af_sky',
-    'am_adam', 'am_michael',
-    'bf_emma', 'bf_isabella',
-    'bm_george', 'bm_lewis'
+    'af', 'af_alloy', 'af_aoede', 'af_bella', 'af_heart', 'af_jessica', 'af_kore', 'af_nicole', 'af_nova', 'af_river', 'af_sarah', 'af_sky',
+    'am_adam', 'am_echo', 'am_eric', 'am_fenrir', 'am_liam', 'am_michael', 'am_onyx', 'am_puck', 'am_santa',
+    'bf_alice', 'bf_emma', 'bf_isabella', 'bf_lily',
+    'bm_daniel', 'bm_fable', 'bm_george', 'bm_lewis',
+    'ef_dora', 'em_alex', 'em_santa',
+    'ff_siwis',
+    'hf_alpha', 'hf_beta', 'hm_omega', 'hm_psi',
+    'if_sara', 'im_nicola',
+    'jf_alpha', 'jf_gongitsune', 'jf_nezumi', 'jf_tebukuro', 'jm_kumo',
+    'pf_dora', 'pm_alex', 'pm_santa',
+    'zf_xiaobei', 'zf_xiaoni', 'zf_xiaoxiao', 'zf_xiaoyi', 'zm_yunjian', 'zm_yunxi', 'zm_yunxia', 'zm_yunyang'
   ];
 
   bool _isInitializing = true;
@@ -131,17 +138,25 @@ class _KokoroHomeState extends State<KokoroHome> with SingleTickerProviderStateM
   Future<void> _extractEspeakData() async {
     final supportDir = await getApplicationSupportDirectory();
     final espeakDataPath = '${supportDir.path}/assets/espeak-ng-data';
-    if (!await Directory(espeakDataPath).exists()) {
-      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
-      final espeakAssets = manifest.listAssets().where((String key) => key.startsWith('assets/espeak-ng-data/') && !key.contains('.DS_Store'));
+    
+    final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+    final espeakAssets = manifest.listAssets().where((String key) => key.startsWith('assets/espeak-ng-data/') && !key.contains('.DS_Store'));
 
-      for (String assetPath in espeakAssets) {
+    int copiedCount = 0;
+    for (String assetPath in espeakAssets) {
+      final file = File('${supportDir.path}/$assetPath');
+      if (!await file.exists()) {
         final byteData = await rootBundle.load(assetPath);
-        final file = File('${supportDir.path}/$assetPath');
         await file.parent.create(recursive: true);
         await file.writeAsBytes(byteData.buffer.asUint8List(byteData.offsetInBytes, byteData.lengthInBytes));
+        copiedCount++;
       }
     }
+    print("Flutter: Checked espeak-ng-data, copied $copiedCount new files.");
+    
+    // Check if phontab exists
+    final phontabFile = File('${supportDir.path}/assets/espeak-ng-data/phontab');
+    print("Flutter: phontab exists on device: ${await phontabFile.exists()}");
   }
 
   Future<void> _initEngine() async {

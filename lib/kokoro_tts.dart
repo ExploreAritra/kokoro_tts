@@ -94,7 +94,7 @@ class KokoroTts {
 
   /// Splits text into sentences and yields the file path for each synthesized audio chunk sequentially.
   static Stream<String> synthesizeStream(String text, String voiceName, {double speed = 1.0}) async* {
-    final RegExp sentenceSplitter = RegExp(r'(?<=[.!?\n])\s+');
+    final RegExp sentenceSplitter = RegExp(r'''(?<!\bDr\.)(?<!\bMr\.)(?<!\bMs\.)(?<!\bMrs\.)(?<!\bProf\.)(?<!\bSr\.)(?<!\bJr\.)(?<!\bSt\.)(?<!\bvs\.)\s*(?<=[.!?\n।॥。！？])\s+(?=[A-Z"'\u0900-\u097F\u0980-\u09FF\u4E00-\u9FFF\u3040-\u30FF])|(?<=\n\n)\s*''');
     // For very long contiguous text without punctuation, this might still generate large chunks, 
     // but works perfectly for standard text.
     final List<String> sentences = text.split(sentenceSplitter).where((s) => s.trim().isNotEmpty).toList();
