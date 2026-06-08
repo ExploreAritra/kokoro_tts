@@ -1,4 +1,11 @@
 # Miscellaneous
+# Large ONNX / download artifacts — fetched at runtime, not committed
+ios/src/download/
+ios/src/lib/onnxruntime-android-*/
+example/assets/voices_flat.bin
+
+# Scratch / one-off scripts
+test_regex.dart
 *.class
 *.log
 *.pyc

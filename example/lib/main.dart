@@ -10,7 +10,8 @@ import 'package:flutter_soloud/flutter_soloud.dart';
 import 'package:dio/dio.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:path_provider/path_provider.dart';
-
+import 'package:share_plus/share_plus.dart';
+import 'dart:typed_data';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
     final session = await AudioSession.instance;
@@ -69,6 +70,7 @@ class _KokoroHomeState extends State<KokoroHome> with SingleTickerProviderStateM
   bool _isPlaying = false;
   bool _isPaused = false;
   String _statusMessage = "Loading neural networks...";
+  List<String> _generatedWavPaths = [];
   
   double _targetSpeed = 1.0;
   double _targetPitch = 1.0;
@@ -264,6 +266,7 @@ class _KokoroHomeState extends State<KokoroHome> with SingleTickerProviderStateM
     if (_textController.text.trim().isEmpty) return;
     
     await _stopAudio();
+    _generatedWavPaths.clear();
 
     setState(() {
       _isSynthesizing = true;
@@ -280,6 +283,7 @@ class _KokoroHomeState extends State<KokoroHome> with SingleTickerProviderStateM
       ).listen(
         (String outputPath) async {
           print("Flutter: New audio chunk received: $outputPath");
+          _generatedWavPaths.add(outputPath);
           try {
             await Future.delayed(const Duration(milliseconds: 10)); // Give filesystem time to flush
             final fileBytes = await File(outputPath).readAsBytes();
@@ -324,6 +328,79 @@ class _KokoroHomeState extends State<KokoroHome> with SingleTickerProviderStateM
     _stopAudio();
     SoLoud.instance.deinit();
     super.dispose();
+  }
+
+  Future<void> _stitchAndShareAudio(BuildContext context) async {
+    if (_generatedWavPaths.isEmpty) return;
+    
+    setState(() {
+      _statusMessage = "Preparing audio file...";
+    });
+
+    try {
+      final supportDir = await getApplicationSupportDirectory();
+      final finalPath = '${supportDir.path}/final_synthesis.wav';
+      final finalFile = File(finalPath);
+      if (await finalFile.exists()) {
+        await finalFile.delete();
+      }
+
+      final builder = BytesBuilder();
+      List<int>? header;
+      int totalPcmBytes = 0;
+
+      for (int i = 0; i < _generatedWavPaths.length; i++) {
+        final chunkFile = File(_generatedWavPaths[i]);
+        if (!await chunkFile.exists()) continue;
+        
+        final bytes = await chunkFile.readAsBytes();
+        if (bytes.length < 44) continue;
+        
+        if (i == 0) {
+          header = bytes.sublist(0, 44);
+        }
+        
+        final pcmData = bytes.sublist(44);
+        builder.add(pcmData);
+        totalPcmBytes += pcmData.length;
+      }
+
+      if (header != null) {
+        final byteData = ByteData(44);
+        for (int i = 0; i < 44; i++) {
+          byteData.setUint8(i, header[i]);
+        }
+        // ChunkSize: 36 + totalPcmBytes
+        byteData.setUint32(4, 36 + totalPcmBytes, Endian.little);
+        // Subchunk2Size: totalPcmBytes
+        byteData.setUint32(40, totalPcmBytes, Endian.little);
+
+        final finalSink = finalFile.openWrite();
+        finalSink.add(byteData.buffer.asUint8List());
+        finalSink.add(builder.takeBytes());
+        await finalSink.flush();
+        await finalSink.close();
+      }
+
+      setState(() {
+        _statusMessage = "Ready for share";
+      });
+
+      final box = context.findRenderObject() as RenderBox?;
+      await Share.shareXFiles(
+        [XFile(finalPath)], 
+        text: "Generated with Kokoro TTS",
+        sharePositionOrigin: box != null ? (box.localToGlobal(Offset.zero) & box.size) : null,
+      );
+      
+      setState(() {
+        _statusMessage = "Synthesis Complete";
+      });
+    } catch (e) {
+      setState(() {
+        _statusMessage = "Error exporting: $e";
+      });
+    }
   }
 
   Widget _buildGlassmorphicContainer({required Widget child, EdgeInsetsGeometry? padding}) {
@@ -616,42 +693,76 @@ class _KokoroHomeState extends State<KokoroHome> with SingleTickerProviderStateM
                         ],
                       )
                     else
-                      ScaleTransition(
-                        scale: const AlwaysStoppedAnimation(1.0),
-                        child: GestureDetector(
-                          onTap: _isInitializing ? null : _synthesizeAndPlay,
-                          child: Container(
-                            height: 64,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(32),
-                              gradient: const LinearGradient(
-                                colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: const Color(0xFF8E2DE2).withOpacity(0.4),
-                                  blurRadius: 20,
-                                  offset: const Offset(0, 10),
-                                )
-                              ],
-                            ),
-                            child: const Center(
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.graphic_eq_rounded, color: Colors.white),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    "Synthesize",
-                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ScaleTransition(
+                              scale: const AlwaysStoppedAnimation(1.0),
+                              child: GestureDetector(
+                                onTap: _isInitializing ? null : _synthesizeAndPlay,
+                                child: Container(
+                                  height: 64,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(32),
+                                    gradient: const LinearGradient(
+                                      colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: const Color(0xFF8E2DE2).withOpacity(0.4),
+                                        blurRadius: 20,
+                                        offset: const Offset(0, 10),
+                                      )
+                                    ],
                                   ),
-                                ],
+                                  child: const Center(
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.graphic_eq_rounded, color: Colors.white),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          "Synthesize",
+                                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
-                        ),
+                          if (_generatedWavPaths.isNotEmpty) ...[
+                            const SizedBox(width: 16),
+                            GestureDetector(
+                              onTap: () => _stitchAndShareAudio(context),
+                              child: Container(
+                                height: 64,
+                                width: 64,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: const LinearGradient(
+                                    colors: [Color(0xFF00C9FF), Color(0xFF92FE9D)],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFF00C9FF).withOpacity(0.4),
+                                      blurRadius: 20,
+                                      offset: const Offset(0, 10),
+                                    )
+                                  ],
+                                ),
+                                child: const Center(
+                                  child: Icon(Icons.download_rounded, color: Colors.white, size: 28),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     if (_isDownloading)
                       Padding(

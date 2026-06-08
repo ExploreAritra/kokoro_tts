@@ -42,6 +42,10 @@
 #include "nnapi_provider_factory.h"
 #endif
 
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#endif
+
 // Include Kokoro Vocab
 #include "kokoro_vocab.h"
 #ifdef __ANDROID__
@@ -347,18 +351,27 @@ FFI_PLUGIN_EXPORT int kokoro_synthesize(const char* text, const char* voice_name
                     drwav_free(pWavData, nullptr);
                     delete[] pcm_data;
                     
+#ifdef __APPLE__
+                    malloc_zone_pressure_relief(malloc_default_zone(), 0);
+#endif
                     return 0; // Success
                 } else {
                     printf("[Kokoro C++] Error: failed to open output file %s for writing\n", output_wav_path);
                     drwav_free(pWavData, nullptr);
                     delete[] pcm_data;
                     
+#ifdef __APPLE__
+                    malloc_zone_pressure_relief(malloc_default_zone(), 0);
+#endif
                     return -5;
                 }
             } else {
                 delete[] pcm_data;
                 printf("[Kokoro C++] Error: drwav_init_memory_write_sequential_pcm_frames failed\n");
                 
+#ifdef __APPLE__
+                malloc_zone_pressure_relief(malloc_default_zone(), 0);
+#endif
                 return -5; // File write failed
             }
         } else {
@@ -368,19 +381,31 @@ FFI_PLUGIN_EXPORT int kokoro_synthesize(const char* text, const char* voice_name
     } catch (const Ort::Exception& e) {
         printf("[Kokoro C++] Exception during ONNX Run: %s\n", e.what());
         
+#ifdef __APPLE__
+        malloc_zone_pressure_relief(malloc_default_zone(), 0);
+#endif
         return -4; // Inference failed
     } catch (const std::exception& e) {
         printf("[Kokoro C++] Standard exception: %s\n", e.what());
         
+#ifdef __APPLE__
+        malloc_zone_pressure_relief(malloc_default_zone(), 0);
+#endif
         return -4;
     } catch (...) {
         printf("[Kokoro C++] Unknown exception during inference\n");
         
+#ifdef __APPLE__
+        malloc_zone_pressure_relief(malloc_default_zone(), 0);
+#endif
         return -4;
     }
     
     printf("[Kokoro C++] Error: Unknown failure at end of function\n");
     
+#ifdef __APPLE__
+    malloc_zone_pressure_relief(malloc_default_zone(), 0);
+#endif
     return -6; // Unknown failure
 }
 

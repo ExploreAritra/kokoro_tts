@@ -8,12 +8,15 @@ PODS:
     - Flutter
     - onnxruntime-c
   - onnxruntime-c (1.20.0)
+  - share_plus (0.0.1):
+    - Flutter
 
 DEPENDENCIES:
   - audio_session (from `.symlinks/plugins/audio_session/ios`)
   - Flutter (from `Flutter`)
   - flutter_soloud (from `.symlinks/plugins/flutter_soloud/ios`)
   - kokoro_tts (from `.symlinks/plugins/kokoro_tts/ios`)
+  - share_plus (from `.symlinks/plugins/share_plus/ios`)
 
 SPEC REPOS:
   trunk:
@@ -28,6 +31,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/flutter_soloud/ios"
   kokoro_tts:
     :path: ".symlinks/plugins/kokoro_tts/ios"
+  share_plus:
+    :path: ".symlinks/plugins/share_plus/ios"
 
 SPEC CHECKSUMS:
   audio_session: 9bb7f6c970f21241b19f5a3658097ae459681ba0
@@ -35,6 +40,7 @@ SPEC CHECKSUMS:
   flutter_soloud: d9969a9777b511239e85da6e108e05b429207baf
   kokoro_tts: 46a0431d0cb889958cac465af5b0d50631c0fb4c
   onnxruntime-c: 07cfff40dda7e1c54a4350bb2ad226c63150fce3
+  share_plus: 50da8cb520a8f0f65671c6c6a99b3617ed10a58a
 
 PODFILE CHECKSUM: 1e5641b37bdf91373395acef4676ea2018264b7f
 
