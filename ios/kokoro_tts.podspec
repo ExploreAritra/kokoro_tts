@@ -3,7 +3,8 @@
 # Run `pod lib lint kokoro_tts.podspec` to validate before publishing.
 require 'fileutils'
 FileUtils.rm_rf('src')
-FileUtils.cp_r('../src', 'src')
+FileUtils.mkdir_p('src')
+FileUtils.cp_r(Dir.glob('../src/*'), 'src')
 
 Pod::Spec.new do |s|
   s.name             = 'kokoro_tts'
