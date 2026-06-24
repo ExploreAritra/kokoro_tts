@@ -1,5 +1,10 @@
 # Miscellaneous
-# Large ONNX / download artifacts — fetched at runtime, not committed
+# Large ONNX runtime artifacts — downloaded + extracted at build time by
+# src/CMakeLists.txt (file(DOWNLOAD)/ARCHIVE_EXTRACT), so never committed.
+src/download/
+src/lib/onnxruntime-android-*/
+src/lib/onnxruntime-osx-*/
+# (legacy paths, kept in case an older checkout used them)
 ios/src/download/
 ios/src/lib/onnxruntime-android-*/
 example/assets/voices_flat.bin
