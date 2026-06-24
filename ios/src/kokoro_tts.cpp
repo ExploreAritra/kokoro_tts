@@ -38,9 +38,14 @@
 #endif
 #endif
 
-#ifdef __ANDROID__
-#include "nnapi_provider_factory.h"
-#endif
+// NNAPI EP intentionally NOT used on Android: the bundled
+// `onnxruntime-android` libonnxruntime.so does not export
+// OrtSessionOptionsAppendExecutionProvider_Nnapi, so referencing it made
+// libkokoro_tts.so fail to dlopen ("cannot locate symbol ..."). Kokoro is a
+// small model — the default CPU execution provider is reliable across devices.
+// #ifdef __ANDROID__
+// #include "nnapi_provider_factory.h"
+// #endif
 
 #ifdef __APPLE__
 #include <malloc/malloc.h>
@@ -96,9 +101,10 @@ FFI_PLUGIN_EXPORT int kokoro_init(const char* model_path, const char* voices_pat
 #endif
 
 #ifdef __ANDROID__
-        uint32_t nnapi_flags = 0;
-        OrtSessionOptionsAppendExecutionProvider_Nnapi((OrtSessionOptions*)session_options, nnapi_flags);
-        LOGI("NNAPI Execution Provider Appended.");
+        // Default CPU execution provider (see note at the include above) — NNAPI
+        // is not linkable from the prebuilt onnxruntime-android .so and is flaky
+        // across devices anyway.
+        LOGI("Using CPU Execution Provider on Android.");
 #endif
 
         // Attempt to load model

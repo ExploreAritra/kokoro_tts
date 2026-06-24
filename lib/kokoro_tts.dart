@@ -322,7 +322,14 @@ Future<SendPort> _helperIsolateSendPort = () async {
             } else {
               final ffi.DynamicLibrary dylib = () {
                 if (Platform.isMacOS || Platform.isIOS) return ffi.DynamicLibrary.process();
-                if (Platform.isAndroid || Platform.isLinux) return ffi.DynamicLibrary.open('lib$_libName.so');
+                if (Platform.isAndroid || Platform.isLinux) {
+                  try {
+                    ffi.DynamicLibrary.open('libonnxruntime.so');
+                  } catch (e) {
+                    developer.log("KokoroTts: Failed to pre-load libonnxruntime.so: $e");
+                  }
+                  return ffi.DynamicLibrary.open('lib$_libName.so');
+                }
                 if (Platform.isWindows) return ffi.DynamicLibrary.open('$_libName.dll');
                 throw UnsupportedError('Unknown platform: ${Platform.operatingSystem}');
               }();

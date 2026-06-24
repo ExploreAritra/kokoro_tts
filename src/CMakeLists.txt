@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.10)
 project(kokoro_tts_library VERSION 0.0.1 LANGUAGES C CXX)
 
 # ---- onnxruntime ---
-set(ONNXRUNTIME_VERSION "1.18.0")
+set(ONNXRUNTIME_VERSION "1.20.0")
 if(ANDROID)
     set(ONNXRUNTIME_PREFIX "onnxruntime-android-${ONNXRUNTIME_VERSION}")
     set(ONNXRUNTIME_EXT "aar")
