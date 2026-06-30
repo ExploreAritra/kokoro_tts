@@ -4,7 +4,7 @@
 require 'fileutils'
 FileUtils.rm_rf('src')
 FileUtils.mkdir_p('src')
-FileUtils.cp_r(Dir.glob('../src/*'), 'src')
+FileUtils.cp_r(Dir.glob('../src/*'), 'src', remove_destination: true)
 
 Pod::Spec.new do |s|
   s.name             = 'kokoro_tts'
